@@ -5,8 +5,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="false"
@@ -16,7 +16,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.App">
 
-        <!-- Launcher Activity — только разрешения -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -27,32 +26,11 @@
             </intent-filter>
         </activity>
 
-        <!--
-            BubbleActivity — требования Bubble API:
-            - resizeableActivity=true
-            - documentLaunchMode=always (каждый bubble = отдельный task)
-            - allowEmbedded=true
-        -->
-        <activity
-            android:name=".BubbleActivity"
-            android:exported="true"
-            android:resizeableActivity="true"
-            android:documentLaunchMode="always"
-            android:allowEmbedded="true"
-            android:launchMode="singleTask"
-            android:theme="@style/Theme.Bubble">
-            <intent-filter>
-                <action android:name="android.intent.action.DEFAULT" />
-            </intent-filter>
-        </activity>
-
-        <!-- Foreground Service для микрофона -->
         <service
-            android:name=".RecordingService"
+            android:name=".FloatingWidgetService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- Accessibility Service для автовставки -->
         <service
             android:name=".PasteAccessibilityService"
             android:exported="true"

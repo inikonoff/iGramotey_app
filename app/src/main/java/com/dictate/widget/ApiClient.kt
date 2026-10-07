@@ -6,6 +6,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -20,9 +21,10 @@ class ApiClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)  // Groq может думать
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
+    /** Голосовая диктовка — аудиофайл → транскрибация → "Красиво" → текст */
     fun processAudio(audioFile: File): ApiResult {
         return try {
             val requestBody = MultipartBody.Builder()
@@ -41,36 +43,57 @@ class ApiClient {
                 .build()
 
             Log.d("ApiClient", "Sending audio: ${audioFile.length()} bytes")
-
-            val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: ""
-
-            Log.d("ApiClient", "Response ${response.code}: $body")
-
-            if (!response.isSuccessful) {
-                return ApiResult.Error("Ошибка сервера: ${response.code}")
-            }
-
-            val json = JSONObject(body)
-            val status = json.optString("status")
-            val text = json.optString("text")
-
-            if (status == "success" && text.isNotBlank()) {
-                ApiResult.Success(text)
-            } else {
-                ApiResult.Error(text.ifBlank { "Пустой ответ от сервера" })
-            }
-
+            executeAndParse(request)
         } catch (e: Exception) {
-            Log.e("ApiClient", "Request failed: ${e.message}")
-            val msg = when {
-                e.message?.contains("timeout", ignoreCase = true) == true ->
-                    "Сервер не ответил вовремя. Попробуй ещё раз."
-                e.message?.contains("Unable to resolve host") == true ->
-                    "Нет интернета"
-                else -> "Ошибка соединения: ${e.message?.take(60)}"
-            }
-            ApiResult.Error(msg)
+            Log.e("ApiClient", "processAudio failed: ${e.message}")
+            ApiResult.Error(humanizeError(e))
         }
+    }
+
+    /** Текст из буфера → "Красиво" → текст */
+    fun processText(text: String): ApiResult {
+        return try {
+            val json = JSONObject().put("text", text).toString()
+            val body = json.toRequestBody("application/json".toMediaType())
+
+            val request = Request.Builder()
+                .url("${BuildConfig.API_BASE_URL}/api/correct")
+                .addHeader("X-App-Token", BuildConfig.APP_SECRET_TOKEN)
+                .post(body)
+                .build()
+
+            Log.d("ApiClient", "Sending text: ${text.length} chars")
+            executeAndParse(request)
+        } catch (e: Exception) {
+            Log.e("ApiClient", "processText failed: ${e.message}")
+            ApiResult.Error(humanizeError(e))
+        }
+    }
+
+    private fun executeAndParse(request: Request): ApiResult {
+        val response = client.newCall(request).execute()
+        val body = response.body?.string() ?: ""
+        Log.d("ApiClient", "Response ${response.code}: ${body.take(200)}")
+
+        if (!response.isSuccessful) {
+            return ApiResult.Error("Ошибка сервера: ${response.code}")
+        }
+
+        val json = JSONObject(body)
+        val status = json.optString("status")
+        val text = json.optString("text")
+
+        return if (status == "success" && text.isNotBlank()) {
+            ApiResult.Success(text)
+        } else {
+            ApiResult.Error(text.ifBlank { "Пустой ответ от сервера" })
+        }
+    }
+
+    private fun humanizeError(e: Exception): String = when {
+        e.message?.contains("timeout", ignoreCase = true) == true ->
+            "Сервер не ответил вовремя. Попробуй ещё раз."
+        e.message?.contains("Unable to resolve host") == true -> "Нет интернета"
+        else -> "Ошибка соединения: ${e.message?.take(60)}"
     }
 }
