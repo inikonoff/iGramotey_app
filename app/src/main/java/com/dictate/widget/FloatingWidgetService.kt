@@ -11,7 +11,9 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -61,7 +63,18 @@ class FloatingWidgetService : Service() {
     private var initialTouchX = 0f
     private var initialTouchY = 0f
     private var isDragging = false
-    private val DRAG_THRESHOLD = 18f
+    // Порог сдвига в dp, а не в пикселях: 18 px на плотных экранах — это ~6 dp,
+    // дрожание пальца при удержании считалось перетаскиванием
+    private val dragThreshold by lazy { 12f * resources.displayMetrics.density }
+
+    // Запись стартует не на ACTION_DOWN, а после короткого удержания — иначе
+    // каждое перетаскивание сначала запускало MediaRecorder (синхронно, на UI-потоке)
+    // и тут же его останавливало, отсюда рывок в начале движения
+    private val handler = Handler(Looper.getMainLooper())
+    private val HOLD_DELAY_MS = 180L
+    private val startRecordingRunnable = Runnable {
+        if (currentState == WidgetState.IDLE && !isDragging) startRecording()
+    }
 
     // Двойной тап для выхода
     private var lastTapTime = 0L
@@ -108,6 +121,7 @@ class FloatingWidgetService : Service() {
         isRunning = false
         savePosition()
         unregisterClipboardListener()
+        handler.removeCallbacks(startRecordingRunnable)
         scope.cancel()
         audioRecorder.release()
         try {
@@ -176,7 +190,10 @@ class FloatingWidgetService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    // Без этого флага оверлей из сервиса рисуется программно (CPU) —
+                    // цветной эмодзи перерисовывался медленно при каждом сдвиге
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -326,8 +343,8 @@ class FloatingWidgetService : Service() {
                             return true
                         }
                         lastTapTime = now
-                        // Зажал — мгновенно начинаем запись
-                        startRecording()
+                        // Зажал — начинаем запись, если палец не двинулся за HOLD_DELAY_MS
+                        handler.postDelayed(startRecordingRunnable, HOLD_DELAY_MS)
                     }
                     else -> { /* ничего */ }
                 }
@@ -337,8 +354,9 @@ class FloatingWidgetService : Service() {
                 val dx = event.rawX - initialTouchX
                 val dy = event.rawY - initialTouchY
                 if (!isDragging &&
-                    (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) {
+                    (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold)) {
                     isDragging = true
+                    handler.removeCallbacks(startRecordingRunnable)
                     if (currentState == WidgetState.RECORDING) cancelRecording()
                 }
                 if (isDragging) {
@@ -349,6 +367,7 @@ class FloatingWidgetService : Service() {
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                handler.removeCallbacks(startRecordingRunnable)
                 if (isDragging) {
                     savePosition()
                 } else if (currentState == WidgetState.RECORDING) {
