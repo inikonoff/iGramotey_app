@@ -1,0 +1,5 @@
+-keep class com.dictate.widget.** { *; }
+-keep class okhttp3.** { *; }
+-dontwarn okhttp3.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
