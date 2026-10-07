@@ -16,12 +16,49 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Gradle ставится отдельно (wrapper jar в репозитории отсутствует)
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.4"
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      # Подпись release: если заданы секреты KEYSTORE_BASE64, KEYSTORE_PASSWORD,
+      # KEY_ALIAS, KEY_PASSWORD — используем их (стабильная подпись, обновления
+      # ставятся поверх). Иначе генерируем одноразовый ключ.
+      - name: Prepare signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD_SECRET: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS_SECRET: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD_SECRET: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          KS="$RUNNER_TEMP/release.jks"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
+            PW="$KEYSTORE_PASSWORD_SECRET"; ALIAS="$KEY_ALIAS_SECRET"; KPW="$KEY_PASSWORD_SECRET"
+          else
+            echo "::warning::Секреты подписи не заданы — release подписан одноразовым ключом"
+            PW="$(openssl rand -hex 16)"; ALIAS="igramotey"; KPW="$PW"
+            keytool -genkeypair -keystore "$KS" -storepass "$PW" -keypass "$KPW" \
+              -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=iGramotey"
+          fi
+          echo "::add-mask::$PW"; echo "::add-mask::$KPW"
+          {
+            echo "KEYSTORE_FILE=$KS"
+            echo "KEYSTORE_PASSWORD=$PW"
+            echo "KEY_ALIAS=$ALIAS"
+            echo "KEY_PASSWORD=$KPW"
+          } >> "$GITHUB_ENV"
+
+      - name: Build debug and release APK
+        run: gradle assembleDebug assembleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
           name: igramotey-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: igramotey-release-apk
+          path: app/build/outputs/apk/release/*.apk
