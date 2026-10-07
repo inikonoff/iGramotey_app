@@ -9,6 +9,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
@@ -86,6 +87,7 @@ class FloatingWidgetService : Service() {
     private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
     // SharedPreferences — позиция
+    private val WIDGET_SIZE_DP = 64
     private val PREFS_NAME = "igramotey_prefs"
     private val PREF_X = "widget_x"
     private val PREF_Y = "widget_y"
@@ -163,6 +165,10 @@ class FloatingWidgetService : Service() {
             textSize = stateAppearance[WidgetState.IDLE]!!.textSize
             gravity = Gravity.CENTER
             setPadding(20, 20, 20, 20)
+            // Круглая подложка фиксированного размера: иконка заметна на любом фоне
+            minWidth = dp(WIDGET_SIZE_DP)
+            minHeight = dp(WIDGET_SIZE_DP)
+            background = backdrop(WidgetState.IDLE)
         }
 
         // Буфер обмена — вторая иконка, скрыта по умолчанию
@@ -172,8 +178,9 @@ class FloatingWidgetService : Service() {
             gravity = Gravity.CENTER
             setPadding(14, 14, 14, 14)
             visibility = View.GONE
-            // Лёгкий полупрозрачный фон чтобы было видно на любом фоне
-            setBackgroundColor(Color.argb(60, 0, 0, 0))
+            minWidth = dp(WIDGET_SIZE_DP)
+            minHeight = dp(WIDGET_SIZE_DP)
+            background = backdrop(WidgetState.IDLE)
         }
 
         // Контейнер — горизонтальный, микрофон + (опционально) буфер
@@ -181,7 +188,10 @@ class FloatingWidgetService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(widgetText)
-            addView(clipboardBtn)
+            addView(clipboardBtn, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = dp(8) })
         }
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -442,6 +452,7 @@ class FloatingWidgetService : Service() {
         val a = stateAppearance[state]!!
         widgetText.text = a.emoji
         widgetText.textSize = a.textSize
+        widgetText.background = backdrop(state)
         layoutParams.alpha = when (state) {
             WidgetState.RECORDING  -> 1.0f
             WidgetState.PROCESSING -> 0.75f
@@ -449,6 +460,20 @@ class FloatingWidgetService : Service() {
             WidgetState.IDLE       -> 0.92f
         }
         windowManager.updateViewLayout(container, layoutParams)
+    }
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    /** Круглая подложка: тёмная в покое, цветная в зависимости от состояния, с белой обводкой */
+    private fun backdrop(state: WidgetState) = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(when (state) {
+            WidgetState.IDLE       -> Color.argb(220, 33, 37, 41)
+            WidgetState.RECORDING  -> Color.argb(240, 198, 40, 40)
+            WidgetState.PROCESSING -> Color.argb(220, 96, 96, 96)
+            WidgetState.DONE       -> Color.argb(240, 46, 125, 50)
+        })
+        setStroke(dp(2), Color.argb(230, 255, 255, 255))
     }
 
     private fun copyToClipboard(text: String) {
