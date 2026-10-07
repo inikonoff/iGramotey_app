@@ -33,8 +33,11 @@ jobs:
         run: |
           KS="$RUNNER_TEMP/release.jks"
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
-            PW="$KEYSTORE_PASSWORD_SECRET"; ALIAS="$KEY_ALIAS_SECRET"; KPW="$KEY_PASSWORD_SECRET"
+            # убираем пробелы, \r и переводы строк — частая ошибка при вставке секретов
+            echo "$KEYSTORE_BASE64" | tr -d ' \r\n' | base64 -d > "$KS"
+            PW="$(printf %s "$KEYSTORE_PASSWORD_SECRET" | tr -d '\r\n')"
+            ALIAS="$(printf %s "$KEY_ALIAS_SECRET" | tr -d '\r\n')"
+            KPW="$(printf %s "$KEY_PASSWORD_SECRET" | tr -d '\r\n')"
           else
             echo "::warning::Секреты подписи не заданы — APK подписан одноразовым ключом, поверх прошлой сборки НЕ установится (см. CHANGELOG.md)"
             PW="$(openssl rand -hex 16)"; ALIAS="igramotey"; KPW="$PW"
@@ -43,6 +46,11 @@ jobs:
               -dname "CN=iGramotey"
           fi
           echo "::add-mask::$PW"; echo "::add-mask::$KPW"
+          # Проверяем ключ сразу, чтобы ошибка в секретах была понятной
+          if ! keytool -list -keystore "$KS" -storepass "$PW" -alias "$ALIAS" >/dev/null 2>&1; then
+            echo "::error::Не удалось открыть keystore: проверьте секреты KEYSTORE_BASE64, KEYSTORE_PASSWORD и KEY_ALIAS"
+            exit 1
+          fi
           {
             echo "KEYSTORE_FILE=$KS"
             echo "KEYSTORE_PASSWORD=$PW"
