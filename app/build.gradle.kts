@@ -11,8 +11,10 @@ android {
         applicationId = "com.dictate.widget"
         minSdk = 29   // Bubble API требует Android 10+ (29), стабильно с 11 (30)
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0"
+        // В CI versionCode растёт с каждой сборкой — это позволяет ставить
+        // новую сборку поверх установленной (нужна ещё одна и та же подпись).
+        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 2
+        versionName = System.getenv("VERSION_NAME") ?: "2.0"
 
         buildConfigField("String", "API_BASE_URL", "\"https://voicebot-iwdm.onrender.com\"")
         buildConfigField("String", "APP_SECRET_TOKEN", "\"my_super_secret_123\"")
@@ -35,6 +37,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Та же подпись, что у release — чтобы debug и release ставились друг поверх друга
+            if (System.getenv("KEYSTORE_FILE") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
             if (System.getenv("KEYSTORE_FILE") != null) {
                 signingConfig = signingConfigs.getByName("release")

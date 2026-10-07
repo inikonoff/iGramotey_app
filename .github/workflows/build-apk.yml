@@ -36,7 +36,7 @@ jobs:
             echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
             PW="$KEYSTORE_PASSWORD_SECRET"; ALIAS="$KEY_ALIAS_SECRET"; KPW="$KEY_PASSWORD_SECRET"
           else
-            echo "::warning::Секреты подписи не заданы — release подписан одноразовым ключом"
+            echo "::warning::Секреты подписи не заданы — APK подписан одноразовым ключом, поверх прошлой сборки НЕ установится (см. CHANGELOG.md)"
             PW="$(openssl rand -hex 16)"; ALIAS="igramotey"; KPW="$PW"
             keytool -genkeypair -keystore "$KS" -storepass "$PW" -keypass "$KPW" \
               -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
@@ -49,6 +49,12 @@ jobs:
             echo "KEY_ALIAS=$ALIAS"
             echo "KEY_PASSWORD=$KPW"
           } >> "$GITHUB_ENV"
+
+      # versionCode растёт с номером запуска — каждая новая сборка новее предыдущей
+      - name: Set version
+        run: |
+          echo "VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=2.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
 
       - name: Build debug and release APK
         run: gradle assembleDebug assembleRelease --no-daemon
