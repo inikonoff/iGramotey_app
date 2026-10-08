@@ -482,9 +482,9 @@ class FloatingWidgetService : Service() {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = dp(16).toFloat()
         setColor(when (state) {
-            WidgetState.IDLE       -> Color.rgb(25, 118, 210)
+            WidgetState.IDLE       -> Color.rgb(158, 158, 158)
             WidgetState.RECORDING  -> Color.rgb(198, 40, 40)
-            WidgetState.PROCESSING -> Color.rgb(117, 117, 117)
+            WidgetState.PROCESSING -> Color.rgb(97, 97, 97)
             WidgetState.DONE       -> Color.rgb(46, 125, 50)
         })
     }
