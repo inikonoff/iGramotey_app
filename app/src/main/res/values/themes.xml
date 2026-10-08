@@ -6,7 +6,7 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
 
-    <!-- Невидимая activity для чтения буфера обмена -->
+    <!-- Прозрачная activity (обработка выделенного текста) -->
     <style name="Theme.Transparent" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowIsTranslucent">true</item>

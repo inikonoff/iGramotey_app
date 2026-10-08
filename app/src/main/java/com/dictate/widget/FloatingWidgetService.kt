@@ -40,16 +40,15 @@ class FloatingWidgetService : Service() {
 
     data class StateAppearance(val emoji: String, val textSize: Float)
     private val stateAppearance = mapOf(
-        WidgetState.IDLE       to StateAppearance("🎤", 40f),
-        WidgetState.RECORDING  to StateAppearance("🎤", 48f),
-        WidgetState.PROCESSING to StateAppearance("⏳", 40f),
-        WidgetState.DONE       to StateAppearance("✅", 40f)
+        WidgetState.IDLE       to StateAppearance("🎤", 32f),
+        WidgetState.RECORDING  to StateAppearance("🎤", 32f),
+        WidgetState.PROCESSING to StateAppearance("⏳", 32f),
+        WidgetState.DONE       to StateAppearance("✅", 32f)
     )
 
     private lateinit var windowManager: WindowManager
     private lateinit var container: LinearLayout
     private lateinit var widgetText: TextView
-    private lateinit var clipboardBtn: TextView   // иконка 📋, всегда на виджете
     private lateinit var layoutParams: WindowManager.LayoutParams
 
     private val audioRecorder = AudioRecorder()
@@ -94,9 +93,6 @@ class FloatingWidgetService : Service() {
 
         @Volatile
         var isRunning = false
-
-        @Volatile
-        var instance: FloatingWidgetService? = null
             private set
     }
 
@@ -109,7 +105,6 @@ class FloatingWidgetService : Service() {
             startForegroundNotification()
             createWidget()
             isRunning = true
-            instance = this
         } catch (e: Exception) {
             Log.e(TAG, "Failed: ${e.message}", e)
             stopSelf()
@@ -119,7 +114,6 @@ class FloatingWidgetService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
-        instance = null
         savePosition()
         handler.removeCallbacks(startRecordingRunnable)
         scope.cancel()
@@ -169,26 +163,10 @@ class FloatingWidgetService : Service() {
             background = backdrop(WidgetState.IDLE)
         }
 
-        // Буфер обмена — вторая иконка, всегда видна
-        clipboardBtn = TextView(this).apply {
-            text = "📋"
-            textSize = 32f
-            gravity = Gravity.CENTER
-            setPadding(14, 14, 14, 14)
-            minWidth = dp(WIDGET_SIZE_DP)
-            minHeight = dp(WIDGET_SIZE_DP)
-            background = backdrop(WidgetState.IDLE)
-        }
-
-        // Контейнер — горизонтальный, микрофон + (опционально) буфер
         container = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(widgetText)
-            addView(clipboardBtn, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { leftMargin = dp(8) })
         }
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -212,9 +190,6 @@ class FloatingWidgetService : Service() {
         // Тач только на микрофоне — запись и перетаскивание
         widgetText.setOnTouchListener { _, event -> handleTouch(event) }
 
-        // Тач на 📋 — обработать буфер
-        clipboardBtn.setOnClickListener { processClipboardText() }
-
         windowManager.addView(container, layoutParams)
     }
 
@@ -224,62 +199,6 @@ class FloatingWidgetService : Service() {
                 .putInt(PREF_X, layoutParams.x)
                 .putInt(PREF_Y, layoutParams.y)
                 .apply()
-        }
-    }
-
-    // ── CLIPBOARD ─────────────────────────────────────────────────────────
-
-    /** Нажатие на 📋: прозрачная activity получает фокус и читает буфер */
-    private fun processClipboardText() {
-        if (currentState != WidgetState.IDLE) {
-            Toast.makeText(this, "Подожди, идёт обработка", Toast.LENGTH_SHORT).show()
-            return
-        }
-        try {
-            startActivity(
-                Intent(this, ClipboardReadActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Cannot start ClipboardReadActivity: ${e.message}")
-            Toast.makeText(this, "Не удалось прочитать буфер", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    /** Вызывается из ClipboardReadActivity с текстом из буфера (null — буфер недоступен) */
-    fun onClipboardText(raw: String?) {
-        val text = raw?.trim()
-        if (text.isNullOrBlank()) {
-            Toast.makeText(this, "Буфер пуст", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        setState(WidgetState.PROCESSING)
-        vibrate(40)
-
-        scope.launch {
-            // Дать фокусу вернуться в приложение, куда будет вставка
-            delay(300)
-            val result = withContext(Dispatchers.IO) {
-                apiClient.processText(text)
-            }
-            when (result) {
-                is ApiResult.Success -> {
-                    copyToClipboard(result.text)
-                    val pasted = PasteAccessibilityService.pasteText(result.text)
-                    if (!pasted && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                        Toast.makeText(this@FloatingWidgetService, "📋 Скопировано!", Toast.LENGTH_SHORT).show()
-                    }
-                    setState(WidgetState.DONE)
-                    vibrate(80)
-                    delay(3000)
-                    if (currentState == WidgetState.DONE) setState(WidgetState.IDLE)
-                }
-                is ApiResult.Error -> {
-                    Toast.makeText(this@FloatingWidgetService, result.message, Toast.LENGTH_LONG).show()
-                    setState(WidgetState.IDLE)
-                }
-            }
         }
     }
 
