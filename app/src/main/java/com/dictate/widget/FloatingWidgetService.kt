@@ -21,7 +21,6 @@ import android.os.VibratorManager
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -50,7 +49,7 @@ class FloatingWidgetService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var container: LinearLayout
     private lateinit var widgetText: TextView
-    private lateinit var clipboardBtn: TextView   // иконка 📋, появляется при копировании
+    private lateinit var clipboardBtn: TextView   // иконка 📋, всегда на виджете
     private lateinit var layoutParams: WindowManager.LayoutParams
 
     private val audioRecorder = AudioRecorder()
@@ -81,9 +80,6 @@ class FloatingWidgetService : Service() {
     private var lastTapTime = 0L
     private val DOUBLE_TAP_MS = 400L
 
-    // Буфер обмена
-    private lateinit var clipboardManager: ClipboardManager
-    private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
     // SharedPreferences — позиция
     private val WIDGET_SIZE_DP = 64
@@ -112,7 +108,6 @@ class FloatingWidgetService : Service() {
         try {
             startForegroundNotification()
             createWidget()
-            registerClipboardListener()
             isRunning = true
             instance = this
         } catch (e: Exception) {
@@ -126,7 +121,6 @@ class FloatingWidgetService : Service() {
         isRunning = false
         instance = null
         savePosition()
-        unregisterClipboardListener()
         handler.removeCallbacks(startRecordingRunnable)
         scope.cancel()
         audioRecorder.release()
@@ -175,13 +169,12 @@ class FloatingWidgetService : Service() {
             background = backdrop(WidgetState.IDLE)
         }
 
-        // Буфер обмена — вторая иконка, скрыта по умолчанию
+        // Буфер обмена — вторая иконка, всегда видна
         clipboardBtn = TextView(this).apply {
             text = "📋"
             textSize = 32f
             gravity = Gravity.CENTER
             setPadding(14, 14, 14, 14)
-            visibility = View.GONE
             minWidth = dp(WIDGET_SIZE_DP)
             minHeight = dp(WIDGET_SIZE_DP)
             background = backdrop(WidgetState.IDLE)
@@ -234,59 +227,7 @@ class FloatingWidgetService : Service() {
         }
     }
 
-    // ── CLIPBOARD MONITORING ──────────────────────────────────────────────
-
-    private fun registerClipboardListener() {
-        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-
-        // Android 10+ не отдаёт содержимое буфера приложению без фокуса, а у оверлея
-        // его нет (FLAG_NOT_FOCUSABLE). Поэтому здесь читаем только описание клипа
-        // (оно доступно всегда), а сам текст забираем через ClipboardReadActivity по нажатию на 📋.
-        clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
-            try {
-                val desc = clipboardManager.primaryClipDescription
-                    ?: return@OnPrimaryClipChangedListener
-                // Свою запись (после обработки) не показываем как новую
-                if (desc.label?.toString() == "igramotey") {
-                    Log.d(TAG, "Ignoring own clipboard write")
-                    return@OnPrimaryClipChangedListener
-                }
-                if (!desc.hasMimeType("text/*")) {
-                    hideClipboardIcon()
-                    return@OnPrimaryClipChangedListener
-                }
-                Log.d(TAG, "Clipboard changed (text)")
-                showClipboardIcon()
-            } catch (e: Exception) {
-                Log.w(TAG, "Clipboard listener error: ${e.message}")
-            }
-        }
-        clipboardManager.addPrimaryClipChangedListener(clipboardListener)
-        Log.d(TAG, "Clipboard listener registered")
-    }
-
-    private fun unregisterClipboardListener() {
-        try {
-            clipboardListener?.let {
-                clipboardManager.removePrimaryClipChangedListener(it)
-            }
-        } catch (_: Exception) {}
-        clipboardListener = null
-    }
-
-    private fun showClipboardIcon() {
-        if (clipboardBtn.visibility == View.VISIBLE) return
-        clipboardBtn.visibility = View.VISIBLE
-        clipboardBtn.alpha = 0f
-        clipboardBtn.animate().alpha(1f).setDuration(200).start()
-    }
-
-    private fun hideClipboardIcon() {
-        if (clipboardBtn.visibility != View.VISIBLE) return
-        clipboardBtn.animate().alpha(0f).setDuration(200).withEndAction {
-            clipboardBtn.visibility = View.GONE
-        }.start()
-    }
+    // ── CLIPBOARD ─────────────────────────────────────────────────────────
 
     /** Нажатие на 📋: прозрачная activity получает фокус и читает буфер */
     private fun processClipboardText() {
@@ -310,13 +251,11 @@ class FloatingWidgetService : Service() {
         val text = raw?.trim()
         if (text.isNullOrBlank()) {
             Toast.makeText(this, "Буфер пуст", Toast.LENGTH_SHORT).show()
-            hideClipboardIcon()
             return
         }
 
         setState(WidgetState.PROCESSING)
         vibrate(40)
-        hideClipboardIcon()
 
         scope.launch {
             // Дать фокусу вернуться в приложение, куда будет вставка
