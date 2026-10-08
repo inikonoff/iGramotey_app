@@ -6,6 +6,14 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
 
+    <!-- Невидимая activity для чтения буфера обмена -->
+    <style name="Theme.Transparent" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
     <!-- Тема для BubbleActivity — тёмная, без title bar -->
     <style name="Theme.Bubble" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>

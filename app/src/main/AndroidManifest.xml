@@ -26,6 +26,14 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ClipboardReadActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Transparent" />
+
         <service
             android:name=".FloatingWidgetService"
             android:exported="false"

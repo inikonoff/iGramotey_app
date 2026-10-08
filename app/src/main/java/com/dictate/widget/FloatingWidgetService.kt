@@ -83,7 +83,6 @@ class FloatingWidgetService : Service() {
 
     // Буфер обмена
     private lateinit var clipboardManager: ClipboardManager
-    private var lastClipText: String? = null
     private var clipboardListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
     // SharedPreferences — позиция
@@ -99,6 +98,9 @@ class FloatingWidgetService : Service() {
 
         @Volatile
         var isRunning = false
+
+        @Volatile
+        var instance: FloatingWidgetService? = null
             private set
     }
 
@@ -112,6 +114,7 @@ class FloatingWidgetService : Service() {
             createWidget()
             registerClipboardListener()
             isRunning = true
+            instance = this
         } catch (e: Exception) {
             Log.e(TAG, "Failed: ${e.message}", e)
             stopSelf()
@@ -121,6 +124,7 @@ class FloatingWidgetService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+        instance = null
         savePosition()
         unregisterClipboardListener()
         handler.removeCallbacks(startRecordingRunnable)
@@ -235,27 +239,23 @@ class FloatingWidgetService : Service() {
     private fun registerClipboardListener() {
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
+        // Android 10+ не отдаёт содержимое буфера приложению без фокуса, а у оверлея
+        // его нет (FLAG_NOT_FOCUSABLE). Поэтому здесь читаем только описание клипа
+        // (оно доступно всегда), а сам текст забираем через ClipboardReadActivity по нажатию на 📋.
         clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
             try {
-                val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
-                if (clip.itemCount == 0) return@OnPrimaryClipChangedListener
-                val text = clip.getItemAt(0).coerceToText(this).toString().trim()
-
-                // Игнорируем пустой текст и наш собственный label "igramotey"
-                // (после автовставки буфер тоже меняется — не реагируем на свои события)
-                val label = clip.description?.label?.toString()
-                if (label == "igramotey") {
+                val desc = clipboardManager.primaryClipDescription
+                    ?: return@OnPrimaryClipChangedListener
+                // Свою запись (после обработки) не показываем как новую
+                if (desc.label?.toString() == "igramotey") {
                     Log.d(TAG, "Ignoring own clipboard write")
                     return@OnPrimaryClipChangedListener
                 }
-                if (text.isBlank() || text.length < 5) {
+                if (!desc.hasMimeType("text/*")) {
                     hideClipboardIcon()
                     return@OnPrimaryClipChangedListener
                 }
-                if (text == lastClipText) return@OnPrimaryClipChangedListener
-
-                lastClipText = text
-                Log.d(TAG, "Clipboard updated: ${text.take(50)}")
+                Log.d(TAG, "Clipboard changed (text)")
                 showClipboardIcon()
             } catch (e: Exception) {
                 Log.w(TAG, "Clipboard listener error: ${e.message}")
@@ -288,12 +288,26 @@ class FloatingWidgetService : Service() {
         }.start()
     }
 
+    /** Нажатие на 📋: прозрачная activity получает фокус и читает буфер */
     private fun processClipboardText() {
         if (currentState != WidgetState.IDLE) {
             Toast.makeText(this, "Подожди, идёт обработка", Toast.LENGTH_SHORT).show()
             return
         }
-        val text = lastClipText
+        try {
+            startActivity(
+                Intent(this, ClipboardReadActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Cannot start ClipboardReadActivity: ${e.message}")
+            Toast.makeText(this, "Не удалось прочитать буфер", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Вызывается из ClipboardReadActivity с текстом из буфера (null — буфер недоступен) */
+    fun onClipboardText(raw: String?) {
+        val text = raw?.trim()
         if (text.isNullOrBlank()) {
             Toast.makeText(this, "Буфер пуст", Toast.LENGTH_SHORT).show()
             hideClipboardIcon()
@@ -305,6 +319,8 @@ class FloatingWidgetService : Service() {
         hideClipboardIcon()
 
         scope.launch {
+            // Дать фокусу вернуться в приложение, куда будет вставка
+            delay(300)
             val result = withContext(Dispatchers.IO) {
                 apiClient.processText(text)
             }
@@ -315,8 +331,6 @@ class FloatingWidgetService : Service() {
                     if (!pasted && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                         Toast.makeText(this@FloatingWidgetService, "📋 Скопировано!", Toast.LENGTH_SHORT).show()
                     }
-                    // Обновляем lastClipText чтобы своё же не показывать снова
-                    lastClipText = result.text
                     setState(WidgetState.DONE)
                     vibrate(80)
                     delay(3000)
@@ -426,7 +440,6 @@ class FloatingWidgetService : Service() {
                     if (!pasted && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                         Toast.makeText(this@FloatingWidgetService, "📋 Скопировано!", Toast.LENGTH_SHORT).show()
                     }
-                    lastClipText = result.text
                     setState(WidgetState.DONE)
                     vibrate(80)
                     delay(3000)
@@ -464,16 +477,16 @@ class FloatingWidgetService : Service() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    /** Круглая подложка: тёмная в покое, цветная в зависимости от состояния, с белой обводкой */
+    /** Скруглённый квадрат (как иконка приложения); цвет зависит от состояния, без обводки */
     private fun backdrop(state: WidgetState) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(16).toFloat()
         setColor(when (state) {
-            WidgetState.IDLE       -> Color.argb(220, 33, 37, 41)
-            WidgetState.RECORDING  -> Color.argb(240, 198, 40, 40)
-            WidgetState.PROCESSING -> Color.argb(220, 96, 96, 96)
-            WidgetState.DONE       -> Color.argb(240, 46, 125, 50)
+            WidgetState.IDLE       -> Color.rgb(25, 118, 210)
+            WidgetState.RECORDING  -> Color.rgb(198, 40, 40)
+            WidgetState.PROCESSING -> Color.rgb(117, 117, 117)
+            WidgetState.DONE       -> Color.rgb(46, 125, 50)
         })
-        setStroke(dp(2), Color.argb(230, 255, 255, 255))
     }
 
     private fun copyToClipboard(text: String) {
