@@ -34,14 +34,6 @@ class PasteAccessibilityService : AccessibilityService() {
 
         fun isAvailable(): Boolean = instance != null
 
-        /** Выделение в поле ввода: исходный текст и границы (без выделения — весь текст поля) */
-        class Selection(val text: String, val fullText: String, val start: Int, val end: Int)
-
-        fun getSelection(): Selection? = instance?.doGetSelection()
-
-        /** Заменяет выделение; если поле изменилось за время обработки — false */
-        fun replaceSelection(sel: Selection, newText: String): Boolean =
-            instance?.doReplaceSelection(sel, newText) ?: false
     }
 
     override fun onServiceConnected() {
@@ -110,62 +102,6 @@ class PasteAccessibilityService : AccessibilityService() {
         } finally {
             focused.recycle()
             root.recycle()
-        }
-    }
-
-    private fun focusedEditable(): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
-        val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            ?.takeIf { it.isEditable } ?: findEditableNode(root)
-        root.recycle()
-        return node
-    }
-
-    private fun doGetSelection(): Selection? {
-        val node = focusedEditable() ?: return null
-        try {
-            if (node.isPassword || node.isShowingHintText) return null
-            val full = node.text?.toString().orEmpty()
-            if (full.isBlank()) return null
-            var start = node.textSelectionStart
-            var end = node.textSelectionEnd
-            if (start < 0 || end < 0 || start > full.length || end > full.length) {
-                start = 0; end = full.length
-            }
-            if (start > end) { val t = start; start = end; end = t }
-            if (start == end) { start = 0; end = full.length }   // нет выделения — весь текст поля
-            val picked = full.substring(start, end)
-            if (picked.isBlank()) return null
-            return Selection(picked, full, start, end)
-        } finally {
-            node.recycle()
-        }
-    }
-
-    private fun doReplaceSelection(sel: Selection, newText: String): Boolean {
-        val node = focusedEditable() ?: return false
-        return try {
-            // Поле должно остаться тем же: текст не менялся, пока шла обработка
-            if (node.text?.toString().orEmpty() != sel.fullText) return false
-            val combined = sel.fullText.replaceRange(sel.start, sel.end, newText)
-            val args = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, combined)
-            }
-            val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-            if (ok) {
-                // Курсор в конец вставленного фрагмента
-                val sargs = Bundle().apply {
-                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, sel.start + newText.length)
-                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, sel.start + newText.length)
-                }
-                node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sargs)
-            }
-            ok
-        } catch (e: Exception) {
-            Log.e(TAG, "replaceSelection error: ${e.message}")
-            false
-        } finally {
-            node.recycle()
         }
     }
 

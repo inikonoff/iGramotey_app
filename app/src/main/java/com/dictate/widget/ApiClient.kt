@@ -6,7 +6,6 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -46,26 +45,6 @@ class ApiClient {
             executeAndParse(request)
         } catch (e: Exception) {
             Log.e("ApiClient", "processAudio failed: ${e.message}")
-            ApiResult.Error(humanizeError(e))
-        }
-    }
-
-    /** Текст из буфера → "Красиво" → текст */
-    fun processText(text: String): ApiResult {
-        return try {
-            val json = JSONObject().put("text", text).toString()
-            val body = json.toRequestBody("application/json".toMediaType())
-
-            val request = Request.Builder()
-                .url("${BuildConfig.API_BASE_URL}/api/correct")
-                .addHeader("X-App-Token", BuildConfig.APP_SECRET_TOKEN)
-                .post(body)
-                .build()
-
-            Log.d("ApiClient", "Sending text: ${text.length} chars")
-            executeAndParse(request)
-        } catch (e: Exception) {
-            Log.e("ApiClient", "processText failed: ${e.message}")
             ApiResult.Error(humanizeError(e))
         }
     }

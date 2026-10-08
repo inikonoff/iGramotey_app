@@ -1,7 +1,6 @@
 package com.dictate.widget
 
 import android.app.Notification
-import android.app.PendingIntent
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -72,13 +71,13 @@ class FloatingWidgetService : Service() {
     // и тут же его останавливало, отсюда рывок в начале движения
     private val handler = Handler(Looper.getMainLooper())
     private val HOLD_DELAY_MS = 180L
-    private var holdFired = false   // сработало ли удержание (иначе касание — короткий тап)
     private val startRecordingRunnable = Runnable {
-        if (currentState == WidgetState.IDLE && !isDragging) {
-            holdFired = true
-            startRecording()
-        }
+        if (currentState == WidgetState.IDLE && !isDragging) startRecording()
     }
+
+    // Двойной тап для выхода
+    private var lastTapTime = 0L
+    private val DOUBLE_TAP_MS = 400L
 
 
     // SharedPreferences — позиция
@@ -91,7 +90,6 @@ class FloatingWidgetService : Service() {
         private const val CHANNEL_ID = "dictate_widget_channel"
         private const val NOTIF_ID = 1
         private const val TAG = "iGramotey"
-        private const val ACTION_STOP = "com.dictate.widget.STOP"
 
         @Volatile
         var isRunning = false
@@ -127,15 +125,6 @@ class FloatingWidgetService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            Toast.makeText(this, "iGramotey выключен", Toast.LENGTH_SHORT).show()
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        return super.onStartCommand(intent, flags, startId)
-    }
-
     // ── Notification ──────────────────────────────────────────────────────
 
     private fun startForegroundNotification() {
@@ -149,15 +138,7 @@ class FloatingWidgetService : Service() {
         startForeground(NOTIF_ID,
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("🎤 iGramotey")
-                .setContentText("Зажми виджет — диктовка, тап — обработать выделенный текст")
-                .addAction(
-                    android.R.drawable.ic_menu_close_clear_cancel, "Выключить",
-                    PendingIntent.getService(
-                        this, 0,
-                        Intent(this, FloatingWidgetService::class.java).setAction(ACTION_STOP),
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                    )
-                )
+                .setContentText("Зажми виджет и говори")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
@@ -221,45 +202,7 @@ class FloatingWidgetService : Service() {
         }
     }
 
-    // ── Выделенный текст в поле ввода ─────────────────────────────────────
-
-    private fun processSelectedText() {
-        if (!PasteAccessibilityService.isAvailable()) {
-            Toast.makeText(this, "Включите «iGramotey — автовставка» в спецвозможностях", Toast.LENGTH_LONG).show()
-            return
-        }
-        val sel = PasteAccessibilityService.getSelection()
-        if (sel == null) {
-            Toast.makeText(this, "Поставьте курсор в поле ввода и выделите текст", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        setState(WidgetState.PROCESSING)
-        vibrate(40)
-
-        scope.launch {
-            val result = withContext(Dispatchers.IO) { apiClient.processText(sel.text) }
-            when (result) {
-                is ApiResult.Success -> {
-                    copyToClipboard(result.text)
-                    val replaced = PasteAccessibilityService.replaceSelection(sel, result.text)
-                    if (!replaced) {
-                        Toast.makeText(this@FloatingWidgetService, "Не удалось вставить — текст в буфере обмена", Toast.LENGTH_LONG).show()
-                    }
-                    setState(WidgetState.DONE)
-                    vibrate(80)
-                    delay(3000)
-                    if (currentState == WidgetState.DONE) setState(WidgetState.IDLE)
-                }
-                is ApiResult.Error -> {
-                    Toast.makeText(this@FloatingWidgetService, result.message, Toast.LENGTH_LONG).show()
-                    setState(WidgetState.IDLE)
-                }
-            }
-        }
-    }
-
-    // ── Touch (микрофон) ── ──────────────────────────────────────────────────
+    // ── Touch (микрофон) ───────────────────────────────────────────────────────────────────────────────────────────────────
 
     private fun handleTouch(event: MotionEvent): Boolean {
         when (event.action) {
@@ -271,9 +214,17 @@ class FloatingWidgetService : Service() {
                 initialTouchY = event.rawY
                 isDragging = false
 
-                holdFired = false
-                // Зажал — начинаем запись, если палец не двинулся за HOLD_DELAY_MS
+                val now = System.currentTimeMillis()
                 if (currentState == WidgetState.IDLE) {
+                    // Двойной тап = выход
+                    if (now - lastTapTime < DOUBLE_TAP_MS) {
+                        Log.d(TAG, "Double tap — stopping")
+                        Toast.makeText(this, "iGramotey выключен", Toast.LENGTH_SHORT).show()
+                        stopSelf()
+                        return true
+                    }
+                    lastTapTime = now
+                    // Зажал — начинаем запись, если палец не двинулся за HOLD_DELAY_MS
                     handler.postDelayed(startRecordingRunnable, HOLD_DELAY_MS)
                 }
             }
@@ -301,10 +252,6 @@ class FloatingWidgetService : Service() {
                 } else if (currentState == WidgetState.RECORDING) {
                     // Отпустил палец — стоп и обработка
                     stopRecordingAndProcess()
-                } else if (event.action == MotionEvent.ACTION_UP &&
-                    !holdFired && currentState == WidgetState.IDLE) {
-                    // Короткий тап — обработать выделенный текст в поле ввода
-                    processSelectedText()
                 }
                 isDragging = false
             }

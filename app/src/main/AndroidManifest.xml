@@ -26,21 +26,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Пункт «iGramotey» в меню выделения текста -->
-        <activity
-            android:name=".ProcessTextActivity"
-            android:exported="true"
-            android:excludeFromRecents="true"
-            android:label="iGramotey"
-            android:taskAffinity=""
-            android:theme="@style/Theme.Transparent">
-            <intent-filter>
-                <action android:name="android.intent.action.PROCESS_TEXT" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
-        </activity>
-
         <service
             android:name=".FloatingWidgetService"
             android:exported="false"
