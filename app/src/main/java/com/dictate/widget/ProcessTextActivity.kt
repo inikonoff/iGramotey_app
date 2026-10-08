@@ -43,16 +43,20 @@ class ProcessTextActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) { ApiClient().processText(text) }
             when (result) {
                 is ApiResult.Success -> {
-                    if (readOnly) {
-                        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("igramotey", result.text))
-                        Toast.makeText(this@ProcessTextActivity, "📋 Готово — текст в буфере обмена", Toast.LENGTH_LONG).show()
-                    } else {
+                    // Результат всегда кладём в буфер: часть приложений (в т.ч. оболочки
+                    // вроде MagicOS) не применяют ответ PROCESS_TEXT, тогда его можно вставить вручную
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("igramotey", result.text))
+                    if (!readOnly) {
                         setResult(
                             RESULT_OK,
                             Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, result.text)
                         )
                     }
+                    // Показываем, что именно вернул сервер
+                    val preview = result.text.take(80) + if (result.text.length > 80) "…" else ""
+                    val hint = if (readOnly) "в буфере обмена" else "вставлен; копия в буфере"
+                    Toast.makeText(this@ProcessTextActivity, "✅ ($hint)\n$preview", Toast.LENGTH_LONG).show()
                 }
                 is ApiResult.Error ->
                     Toast.makeText(this@ProcessTextActivity, result.message, Toast.LENGTH_LONG).show()
